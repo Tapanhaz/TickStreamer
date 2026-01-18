@@ -1,0 +1,379 @@
+name: Build Cross-Platform
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  # ******** LINUX x86_64 ********
+  build-linux-x86_64-glibc:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang lld cmake
+
+      - name: Download Boost headers
+        run: |
+          set -a
+          source versions.env
+          set +a
+          BOOST_UNDERSCORE=${BOOST_VERSION//./_}
+          wget https://archives.boost.io/release/$BOOST_VERSION/source/boost_$BOOST_UNDERSCORE.tar.gz
+          tar xzf boost_$BOOST_UNDERSCORE.tar.gz -C external/
+          rm boost_$BOOST_UNDERSCORE.tar.gz
+
+      - name: Initialize submodules
+        run: |
+          git submodule update --init --recursive external/zstd external/simdjson
+
+      - name: Build zstd
+        run: |
+          cd external/zstd
+          make -j$(nproc) CC=clang AR=llvm-ar LD=ld.lld libzstd.a
+
+      - name: Build simdjson
+        run: |
+          cd external/simdjson
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DSIMDJSON_JUST_LIBRARY=ON
+          make -j$(nproc)
+
+      - name: Build stream_ticks
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++
+          cmake --build . -j$(nproc)
+          cpack -G TGZ
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream_ticks-linux-x86_64-glibc
+          path: build/*.tar.gz
+
+  # # ******** LINUX ARM64 ********
+  build-linux-arm64-musl:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang lld cmake \
+            musl-tools musl-dev
+
+      - name: Setup llvm-ar
+        run: |
+          LLVM_AR=$(ls /usr/bin/llvm-ar-* | head -1)
+          sudo ln -sf $LLVM_AR /usr/bin/llvm-ar
+
+      - name: Initialize submodules
+        run: |
+          git submodule update --init --recursive external/zstd external/simdjson
+
+      - name: Build zstd (ARM64)
+        run: |
+          cd external/zstd
+          make -j$(nproc) \
+            CC=clang \
+            AR=llvm-ar \
+            LD=ld.lld \
+            libzstd.a
+
+      - name: Build simdjson (ARM64)
+        run: |
+          cd external/simdjson
+          mkdir build-arm && cd build-arm
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_LINKER=ld.lld \
+            -DSIMDJSON_JUST_LIBRARY=ON
+          make -j$(nproc)
+
+      - name: Set Boost version from versions.env
+        run: |
+          set -a
+          source versions.env
+          set +a
+          echo "Using Boost version: $BOOST_VERSION"
+
+      - name: Download Boost headers
+        run: |
+          BOOST_UNDERSCORE=${BOOST_VERSION//./_}
+          wget https://archives.boost.io/release/$BOOST_VERSION/source/boost_$BOOST_UNDERSCORE.tar.gz
+          tar xzf boost_$BOOST_UNDERSCORE.tar.gz -C external/
+          rm boost_$BOOST_UNDERSCORE.tar.gz
+
+      - name: Build stream_ticks (ARM64 musl)
+        run: |
+          mkdir build-arm && cd build-arm
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_STATIC=ON \
+            -DUSE_MUSL=ON \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_LINKER=ld.lld
+          cmake --build . -j$(nproc)
+          cpack -G TGZ
+
+      - name: Verify static binary
+        run: |
+          file build-arm/bin/stream_ticks
+          ldd build-arm/bin/stream_ticks || echo "Static binary (no dynamic deps)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream_ticks-linux-arm64-musl
+          path: build-arm/*.tar.gz
+
+  # # ******** MAC OS ********
+  build-macos-universal:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake
+
+      - name: Download Boost headers
+        run: |
+          set -a
+          source versions.env
+          set +a
+          BOOST_UNDERSCORE=${BOOST_VERSION//./_}
+          curl -L "https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_UNDERSCORE}.tar.gz" -o boost.tar.gz
+          tar xzf boost.tar.gz -C external/
+          rm boost.tar.gz
+
+      - name: Initialize submodules
+        run: |
+          git submodule update --init --recursive external/zstd external/simdjson
+
+      - name: Build zstd
+        run: |
+          cd external/zstd
+          make -j$(sysctl -n hw.ncpu) CC=clang AR=ar libzstd.a
+
+      - name: Build simdjson
+        run: |
+          cd external/simdjson
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DSIMDJSON_JUST_LIBRARY=ON
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Build (Universal)
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          cmake --build . -j$(sysctl -n hw.ncpu)
+          cpack -G TGZ
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream_ticks-macos-universal
+          path: build/*.tar.gz
+
+  # # ******** WIN x86_64 ********
+  build-windows-x86_64:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Boost headers
+        shell: pwsh
+        run: |
+          $content = Get-Content "versions.env"
+          foreach ($line in $content) {
+              if ($line -match '^\s*BOOST_VERSION\s*=\s*(.*)\s*$') {
+                  $env:BOOST_VERSION = $matches[1] -replace '"',''
+              }
+          }
+          $boostVersionUnderscore = $env:BOOST_VERSION -replace '\.', '_'
+          $boostUrl = "https://archives.boost.io/release/$($env:BOOST_VERSION)/source/boost_$boostVersionUnderscore.zip"
+          $boostZip = "$env:TEMP\boost.zip"
+
+          Write-Host "Downloading Boost $($env:BOOST_VERSION)..."
+          Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip -UseBasicParsing
+
+          Write-Host "Extracting Boost..."
+          Expand-Archive -Path $boostZip -DestinationPath "external" -Force
+          Remove-Item $boostZip
+
+      - name: Initialize submodules
+        run: |
+          git submodule update --init --recursive external/zstd external/simdjson
+
+      - name: Build zstd
+        run: |
+          cd external/zstd
+          mkdir build-win-x64
+          cd build-win-x64
+          cmake ../build/cmake `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DZSTD_BUILD_PROGRAMS=OFF `
+            -DZSTD_BUILD_TESTS=OFF `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -G "Visual Studio 17 2022" -A x64
+          cmake --build . --config Release --target libzstd_static
+
+      - name: Build simdjson
+        run: |
+          cd external/simdjson
+          mkdir build-win-x64
+          cd build-win-x64
+          cmake .. `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DSIMDJSON_JUST_LIBRARY=ON `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -G "Visual Studio 17 2022" -A x64
+          cmake --build . --config Release
+
+      - name: Build stream_ticks
+        run: |
+          mkdir build-win-x64
+          cd build-win-x64
+          cmake .. `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_STATIC=ON `
+            -G "Visual Studio 17 2022" -A x64
+          cmake --build . --config Release
+          cpack -G ZIP -C Release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream_ticks-windows-x86_64
+          path: build-win-x64/*.zip
+
+  # ******** WIN ARM64 ********
+
+  build-windows-arm64:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Boost headers
+        shell: pwsh
+        run: |
+          $content = Get-Content "versions.env"
+          foreach ($line in $content) {
+              if ($line -match '^\s*BOOST_VERSION\s*=\s*(.*)\s*$') {
+                  $env:BOOST_VERSION = $matches[1] -replace '"',''
+              }
+          }
+          $boostVersionUnderscore = $env:BOOST_VERSION -replace '\.', '_'
+          $boostUrl = "https://archives.boost.io/release/$($env:BOOST_VERSION)/source/boost_$boostVersionUnderscore.zip"
+          $boostZip = "$env:TEMP\boost.zip"
+
+          Write-Host "Downloading Boost $($env:BOOST_VERSION)..."
+          Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip -UseBasicParsing
+
+          Write-Host "Extracting Boost..."
+          Expand-Archive -Path $boostZip -DestinationPath "external" -Force
+          Remove-Item $boostZip
+
+      - name: Initialize submodules
+        run: |
+          git submodule update --init --recursive external/zstd external/simdjson
+
+      - name: Build zstd
+        run: |
+          cd external/zstd
+          mkdir build-win-arm64
+          cd build-win-arm64
+          cmake ../build/cmake `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DZSTD_BUILD_PROGRAMS=OFF `
+            -DZSTD_BUILD_TESTS=OFF `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -G "Visual Studio 17 2022" -A ARM64
+          cmake --build . --config Release --target libzstd_static
+
+      - name: Build simdjson
+        run: |
+          cd external/simdjson
+          mkdir build-win-arm64
+          cd build-win-arm64
+          cmake .. `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DSIMDJSON_JUST_LIBRARY=ON `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -G "Visual Studio 17 2022" -A ARM64
+          cmake --build . --config Release
+
+      - name: Build stream_ticks
+        run: |
+          mkdir build-win-arm64
+          cd build-win-arm64
+          cmake .. `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_STATIC=ON `
+            -G "Visual Studio 17 2022" -A ARM64
+          cmake --build . --config Release
+          cpack -G ZIP -C Release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream_ticks-windows-arm64
+          path: build-win-arm64/*.zip
+
+  # ==========================================================
+  release:
+    needs:
+      [
+        build-linux-x86_64-glibc,
+        build-linux-arm64-musl,
+        build-macos-universal,
+        build-windows-x86_64,
+        build-windows-arm64,
+      ]
+
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
