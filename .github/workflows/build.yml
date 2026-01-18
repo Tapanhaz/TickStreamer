@@ -41,7 +41,7 @@ jobs:
       - name: Build simdjson
         run: |
           cd external/simdjson
-          mkdir build && cd build
+          mkdir build-x86 && cd build-x86
           cmake .. -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF \
             -DCMAKE_C_COMPILER=clang \
@@ -83,15 +83,11 @@ jobs:
           LLVM_AR=$(ls /usr/bin/llvm-ar-* | head -1)
           sudo ln -sf $LLVM_AR /usr/bin/llvm-ar
 
-      - name: Set Boost version from versions.env
+      - name: Download Boost headers
         run: |
           set -a
           source versions.env
           set +a
-          echo "Using Boost version: $BOOST_VERSION"
-
-      - name: Download Boost headers
-        run: |
           BOOST_UNDERSCORE=${BOOST_VERSION//./_}
           wget https://archives.boost.io/release/$BOOST_VERSION/source/boost_$BOOST_UNDERSCORE.tar.gz
           tar xzf boost_$BOOST_UNDERSCORE.tar.gz -C external/
@@ -170,10 +166,14 @@ jobs:
         run: |
           git submodule update --init --recursive external/zstd external/simdjson
 
-      - name: Build zstd
+      - name: Build zstd (Universal)
         run: |
           cd external/zstd/lib
-          make -j$(sysctl -n hw.ncpu) CC=clang AR=ar libzstd.a
+          make clean || true
+          make -j$(sysctl -n hw.ncpu) \
+            CC="clang -arch arm64 -arch x86_64" \
+            AR=ar \
+            libzstd.a
 
       - name: Build simdjson
         run: |
