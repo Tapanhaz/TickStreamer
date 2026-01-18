@@ -83,12 +83,12 @@ jobs:
           LLVM_AR=$(ls /usr/bin/llvm-ar-* | head -1)
           sudo ln -sf $LLVM_AR /usr/bin/llvm-ar
 
-          - name: Set Boost version from versions.env
-          run: |
-            set -a
-            source versions.env
-            set +a
-            echo "Using Boost version: $BOOST_VERSION"
+      - name: Set Boost version from versions.env
+        run: |
+          set -a
+          source versions.env
+          set +a
+          echo "Using Boost version: $BOOST_VERSION"
 
       - name: Download Boost headers
         run: |

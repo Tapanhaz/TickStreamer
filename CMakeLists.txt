@@ -163,7 +163,7 @@ target_link_libraries(stream_ticks PRIVATE
 
 # =========================================================================
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT APPLE)
     target_compile_options(stream_ticks PRIVATE
         -O3
         -flto
