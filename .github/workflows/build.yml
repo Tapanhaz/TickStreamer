@@ -36,7 +36,7 @@ jobs:
       - name: Build zstd
         run: |
           cd external/zstd/lib
-          make -j$(nproc) CC=clang AR=llvm-ar LD=ld.lld libzstd.a
+          make -j$(nproc) CC=clang AR=ar LD=ld.lld libzstd.a
 
       - name: Build simdjson
         run: |
