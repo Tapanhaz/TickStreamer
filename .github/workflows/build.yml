@@ -5,9 +5,13 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   # ******** LINUX x86_64 ********
   build-linux-x86_64-glibc:
+    permissions: write-all
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -66,6 +70,7 @@ jobs:
 
   # # ******** LINUX ARM64 ********
   build-linux-arm64-musl:
+    permissions: write-all
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
@@ -143,6 +148,7 @@ jobs:
 
   # # ******** MAC OS ********
   build-macos-universal:
+    permissions: write-all
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -201,6 +207,7 @@ jobs:
 
   # # ******** WIN x86_64 ********
   build-windows-x86_64:
+    permissions: write-all
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -278,6 +285,7 @@ jobs:
   # ******** WIN ARM64 ********
 
   build-windows-arm64:
+    permissions: write-all
     runs-on: windows-2022
     steps:
       - name: Checkout
