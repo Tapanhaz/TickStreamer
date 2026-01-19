@@ -1,6 +1,7 @@
 ## For Replaying market ticks ::
 
-- Download appropiate binary as per the architecture from Release section.
+- Download the appropriate binary for your architecture from the
+  [Releases](https://github.com/Tapanhaz/TickStreamer/releases) section.
 - Run
 
 ```shell
